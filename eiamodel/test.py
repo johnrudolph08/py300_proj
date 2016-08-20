@@ -1,8 +1,9 @@
 # parms for eia_calls
 eia_api = '5F4109570C68FDE20F42C25F5152D879'
 sid = 'EBA.SCL-ALL.D.H'
-start1 = '20160811T01Z'
-end1 = '20160811T23Z'
+start1 = '2016-08-11 01:00:00'
+end1 = '2016-08-11 23:00:00'
+freq1 = 'H'
 # parms for openweathermap calls
 # city ID for seatac
 city_id = 5809805
@@ -11,7 +12,7 @@ start = '2015-09-13 01:00:00'
 end = '2015-09-13 08:00:00'
 units = 'imperial'
 # parms for ncdc calls
-freq = 'hour'
+freq2 = 'hour'
 # ncdc uses GMT
 start2 = '2016-08-05 00:00'
 end2 = '2016-08-05 23:00'

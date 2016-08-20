@@ -25,24 +25,22 @@ class GetEnergy(object):
 
     eia_url = 'http://api.eia.gov/series/'
 
-    def __init__(self, api_key, series, start=None, end=None):
+    def __init__(self, api_key, series, freq=None, start=None, end=None):
         """
         Create eia_api object and related attriobutes from json
         :param api_key: an API key that is provided by EIA
-        :param start: a start date must be in the same date format as eia series
-        :param end:a date
-        :param *args: The series id (also called source key) is a
-                       case-insensitive string consisting of letters, numbers, dashes
-                       ("-") and periods (".") that uniquely identifies an EIA series\
-                       multiple series can be submitted by comma separation ex: api_key, s1, s2
+        Optional parms required for date filter
+        :param start: an optional start date as %Y-%m-%d %H:%M:%S
+        :param end:an optional end date %Y%m%d %H
+        :param freq:  frequency of data valid: 'A', 'M', 'W', 'D', 'H'
         """
         self.api_key = api_key
         self.series_id = series
-        # self.series_id = [";".join(args)] TODO setup to handle *args
-        self.start = start
-        self.end = end
+        self.freq = freq
+        self.start = self.format_date(self.freq, start)
+        self.end = self.format_date(self.freq, end)
         self.json = self.get_series()
-        self.dataframe = self.create_dataframes()
+        self.dataframe = CreateEnergyDataFrame(self.json).dataframe
 
     def get_series(self):
         """
@@ -52,48 +50,21 @@ class GetEnergy(object):
         api_parms = (
             ('api_key', self.api_key),
             ('series_id', self.series_id),
+            ('start', self.start),
+            ('end', self.end),
         )
-        # add optional time parms
-        if self.start and self.end is not None:
-            api_parms = api_parms + (('start', self.start), ('end', self.end),)
+        api_parms = tuple(i for i in api_parms if i[1] is not None)
         eia_req = requests.get(self.eia_url, params=api_parms)
         return json.loads(eia_req.text)
 
-    def create_dataframes(self):
-        """
-        Creates a pandas dataframe of data key in json returned from get_series
-        :param json: is an eia json object
-        """
-        df_dict = {}
-        for series in self.json['series']:
-            df = pd.DataFrame(self.get_values(series), index=self.get_dates(series),
-                              columns=['values'])
-            df_dict[series['series_id']] = df
-        return df_dict
-
     @staticmethod
-    def get_dates(series):
-        """Parse dates from eia json['series']
-        :param series: a series object returned by eia json['series']
-        """
-        # create a dict to look up datetime frequency values
-        freq = {'A': '%Y', 'M': '%Y%m', 'W': '%Y%m%d',
-                'D': '%Y%m%d', 'H': '%Y%m%d %H'}
-        date_list = []
-        for x in series['data']:
-            # need to add this ugly bit to remove hourly time format from EIA
-            time = x[0].replace('T', ' ')
-            time = time.replace('Z', '')
-            date_list.append(datetime.strptime(
-                time, freq[series['f']]).strftime('%Y-%m-%d %H:%M:%S'))
-        return date_list
-
-    @staticmethod
-    def get_values(series):
-        """Parse values from eia json['series']
-        :param series: a series object returned by eia json['series']
-        """
-        return [value[1] for value in series['data']]
+    def format_date(freq, date):
+        """formats input dates to correct"""
+        date = datetime.strptime(date, '%Y-%m-%d %H:%M:%S')
+        freq_dict = {'A': '%Y', 'M': '%Y%m', 'W': '%Y%m%d',
+                     'D': '%Y%m%d', 'H': '%Y%m%dT%HZ'}
+        formatted_date = datetime.strftime(date, freq_dict[freq])
+        return formatted_date
 
 
 class GetWeatherForecast(object):
@@ -272,3 +243,33 @@ def local2utc(date):
         epoch) - datetime.utcfromtimestamp(epoch)
     date_gmt = datetime.strftime(date - offset, '%Y%m%d%H%M')
     return date_gmt
+
+
+class CreateEnergyDataFrame(object):
+    '''Creates the dataframe for Energy API call'''
+
+    def __init__(self, json):
+        """:param json: is an eia json object"""
+        self.json = json
+        self.series = self.json['series']
+        self.data = self.series[0]['data']
+        self.dataframe = self.create_dataframe()
+
+    def create_dataframe(self):
+        """Function to create dataframe from json['series'] """
+        values = [x[1] for x in self.data]
+        dates = self.get_dates()
+        return pd.DataFrame(values, index=dates, columns=['values'])
+
+    def get_dates(self):
+        """Parses text dates to datetime index"""
+        freq = {'A': '%Y', 'M': '%Y%m', 'W': '%Y%m%d',
+                'D': '%Y%m%d', 'H': '%Y%m%d %H'}
+        date_list = []
+        for x in self.data:
+            # need to add this ugly bit to remove hourly time format from EIA
+            time = x[0].replace('T', ' ')
+            time = time.replace('Z', '')
+            date_list.append(datetime.strptime(
+                time, freq[self.series[0]['f']]).strftime('%Y-%m-%d %H:%M:%S'))
+        return date_list
