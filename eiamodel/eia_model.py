@@ -8,12 +8,6 @@ from datetime import datetime
 from io import StringIO
 import time
 
-# TODO GetEnergy can handle time series filter
-# need to limit GetWeatherForecast to filter 24 hours df[:24]
-# need to convert Weather to HDD/CDD
-# write script to fetch Energy and Weather history from last week
-# need to run a regression and use parms
-
 # install request cache to limit calls to api while testing
 requests_cache.install_cache('api_cache', backend='sqlite', expire_after=600)
 
@@ -40,7 +34,7 @@ class GetEnergy(object):
         self.start = self.format_date(self.freq, start)
         self.end = self.format_date(self.freq, end)
         self.json = self.get_series()
-        self.dataframe = CreateEnergyData(self.json).dataframe
+        self.df = CreateEnergyData(self.json).df
 
     def get_series(self):
         """
@@ -85,11 +79,8 @@ class GetWeatherForecast(object):
         self.city_id = city_id
         self.units = units
         self.json = self.get_series()
-        self.dataframe = CreateWeatherForecastData(self.json).dataframe
-        #TODO create class for interpolation
-        # self.hourly_time = self.get_time_hourly(self.dataframe)
-        # self.hourly_temps = self.interpolate_weather(self.dataframe,
-        #                                              self.hourly_time, 'temp')
+        self.df = CreateWeatherForecastData(self.json).df
+        self.df_hr = InterpolateWeatherForecast(self.df).df
 
     def get_series(self):
         """
@@ -102,30 +93,6 @@ class GetWeatherForecast(object):
         )
         owm_req = requests.get(self.owm_url, params=owm_parms)
         return json.loads(owm_req.text)
-
-    def interpolate_weather(self, weather_detail, time, key):
-        """
-        Interpolates the 3hr forecast to an hourly forecast using cubic interpolation
-        :param weather_detail is dataframe weather attributes returned from get_weather_detail
-        :param key is weather detail dataframe column (temp, temp_max or temp_min)
-        """
-        date_len = len(weather_detail.index)
-        date_axis = np.linspace(1, date_len, date_len, endpoint=True)
-        f_cubic = interp1d(date_axis, weather_detail[key])
-        temp_int = f_cubic(np.linspace(
-            1, date_len, num=date_len * 3 - 2, endpoint=True))
-        df = pd.DataFrame(temp_int, index=time, columns=['temp'])
-        df['hdd'] = df.apply(create_hdd, axis=1)
-        df['cdd'] = df.apply(create_cdd, axis=1)
-        return df
-
-    def get_time_hourly(self, weather_detail):
-        """
-        Parses temperature and time from weather objects imbedded in forecast object
-        :param weather detail is dictionary returned from get_weather_detail
-        """
-        min_time, max_time = weather_detail.index.min(), weather_detail.index.max()
-        return pd.date_range(min_time, max_time, freq='H')
 
 
 class GetWeatherHistory(object):
@@ -209,15 +176,6 @@ def create_cdd(temp):
     return max(0, temp['temp'] - 65)
 
 
-def local2utc(date):
-    date = datetime.strptime(date, '%Y-%m-%d %H:%M')
-    epoch = time.mktime(date.timetuple())
-    offset = datetime.fromtimestamp(
-        epoch) - datetime.utcfromtimestamp(epoch)
-    date_gmt = datetime.strftime(date - offset, '%Y%m%d%H%M')
-    return date_gmt
-
-
 class CreateEnergyData(object):
     '''Creates the dataframe for Energy API call'''
 
@@ -226,7 +184,7 @@ class CreateEnergyData(object):
         self.json = json
         self.series = self.json['series']
         self.data = self.series[0]['data']
-        self.dataframe = self.create_dataframe()
+        self.df = self.create_dataframe()
 
     def create_dataframe(self):
         """Function to create dataframe from json['series'] """
@@ -255,7 +213,7 @@ class CreateWeatherForecastData(object):
         """":param json: a open weather map json object """
         self.json = json
         self.series = self.json['list']
-        self.dataframe = self.create_dataframe()
+        self.df = self.create_dataframe()
 
     def create_dataframe(self):
         """Function to create dataframe from json['list'] """
@@ -265,10 +223,34 @@ class CreateWeatherForecastData(object):
             time = datetime.strptime(i['dt_txt'], '%Y-%m-%d %H:%M:%S')
             dates.append(ConvertTime(time).utc_to_local())
             values.append(i['main']['temp'])
-        return pd.DataFrame(values, index=dates, columns=['values'])
+        return pd.DataFrame(values, index=dates, columns=['temp'])
 
 
-#TODO create interpolation class here
+class InterpolateWeatherForecast(object):
+    """Creates hourly forecast from OWM 3 hour forecast"""
+
+    def __init__(self, forecast):
+        """
+        :param forecast: a weather forecast dataframe from GetWeatherForecast
+        """
+        self.forecast = forecast
+        self.hours = self.time_hourly()
+        self.df = self.interpolate()
+
+    def time_hourly(self):
+        """creates hourly time from 3 hour owm forecast"""
+        min_time, max_time = self.forecast.index.min(), self.forecast.index.max()
+        return pd.date_range(min_time, max_time, freq='H')
+
+    def interpolate(self):
+        """interpolate function suing np cubic interpolation"""
+        date_len = len(self.forecast.index)
+        date_axis = np.linspace(1, date_len, date_len, endpoint=True)
+        f_cubic = interp1d(date_axis, self.forecast['temp'])
+        temp_int = f_cubic(np.linspace(
+            1, date_len, num=date_len * 3 - 2, endpoint=True))
+        df = pd.DataFrame(temp_int, index=self.hours, columns=['temp'])
+        return df
 
 
 class ConvertTime(object):
