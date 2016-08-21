@@ -1,12 +1,12 @@
 import requests
 import requests_cache
 import json
+import time
 import pandas as pd
 import numpy as np
 from scipy.interpolate import interp1d
 from datetime import datetime
 from io import StringIO
-import time
 
 # install request cache to limit calls to api while testing
 requests_cache.install_cache('api_cache', backend='sqlite', expire_after=600)
@@ -118,7 +118,7 @@ class GetWeatherHistory(object):
         self.start = self.local2utc(start)
         self.end = self.local2utc(end)
         self.req = self.get_series()
-        self.dataframe = self.create_dataframe().dropna(axis=1, how='all')
+        # self.dataframe = self.create_dataframe().dropna(axis=1, how='all')
 
     def get_series(self):
         """
@@ -221,9 +221,45 @@ class CreateWeatherForecastData(object):
         values = []
         for i in self.series:
             time = datetime.strptime(i['dt_txt'], '%Y-%m-%d %H:%M:%S')
-            dates.append(ConvertTime(time).utc_to_local())
+            dates.append(utc_to_local(time))
             values.append(i['main']['temp'])
         return pd.DataFrame(values, index=dates, columns=['temp'])
+
+
+class CreateWeatheHistoryData(object):
+    """Creates the dataframe for NCDC API call"""
+
+    def __init__(self, req):
+        """
+        :param req: a request object returned from NCDC call
+        """
+        self.req = req
+        self.df = self.create_dataframe().dropna(axis=1, how='all')
+
+    def create_dataframe(self):
+        """Function to create dataframe from req csv object"""
+        req_df = pd.read_csv(StringIO(self.req.text), header=None,
+                             na_values='null', keep_default_na=True, na_filter=True)
+        return self.apply_filters(req_df)
+
+    def apply_filters(self, df):
+        # filter out non hourly increment reads
+        df[df.iloc[:, 19] == 'FM-15']
+        # pad hourly format
+        df.iloc[:, 3] = df.iloc[:, 3].map("{:04}".format)
+        df.loc[:, 'date'] = pd.to_datetime(
+            df.iloc[:, 2].map(str) + df.iloc[:, 3].map(str), format='%Y%m%d%H%M')
+        df.loc[:, 'date'] = df.loc[:, 'date'].map(utc_to_local)
+        df.loc[:, 'temp'] = df.iloc[:, 5].map(self.convert_ncdc_temp)
+        return df.set_index(df['date'])
+
+    @staticmethod
+    def convert_ncdc_temp(temp):
+        """converts ncdc temp top F
+        :param temp: and ncdc formatted temp
+        """
+        # ncdc temp is in Celsius *10 then convert to F
+        return temp / 10 * 9 / 5 + 32
 
 
 class InterpolateWeatherForecast(object):
@@ -253,23 +289,17 @@ class InterpolateWeatherForecast(object):
         return df
 
 
-class ConvertTime(object):
-    """Handles GMT to local conversions"""
+def utc_to_local(date):
+    """converts from gmt to local"""
+    epoch = time.mktime(date.timetuple())
+    offset = datetime.fromtimestamp(
+        epoch) - datetime.utcfromtimestamp(epoch)
+    return date + offset
 
-    def __init__(self, time):
-        """:param time: a datetime object"""
-        self.time = time
 
-    def utc_to_local(self):
-        """converts from gmt to local"""
-        epoch = time.mktime(self.time.timetuple())
-        offset = datetime.fromtimestamp(
-            epoch) - datetime.utcfromtimestamp(epoch)
-        return self.time + offset
-
-    def local_to_utc(self):
-        """converts from local to gmt"""
-        epoch = time.mktime(self.time.timetuple())
-        offset = datetime.fromtimestamp(
-            epoch) - datetime.utcfromtimestamp(epoch)
-        return self.time - offset
+def local_to_utc(date):
+    """converts from local to gmt"""
+    epoch = time.mktime(date.timetuple())
+    offset = datetime.fromtimestamp(
+        epoch) - datetime.utcfromtimestamp(epoch)
+    return date - offset
