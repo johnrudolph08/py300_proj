@@ -40,7 +40,7 @@ class GetEnergy(object):
         self.start = self.format_date(self.freq, start)
         self.end = self.format_date(self.freq, end)
         self.json = self.get_series()
-        self.dataframe = CreateEnergyDataFrame(self.json).dataframe
+        self.dataframe = CreateEnergyData(self.json).dataframe
 
     def get_series(self):
         """
@@ -85,10 +85,11 @@ class GetWeatherForecast(object):
         self.city_id = city_id
         self.units = units
         self.json = self.get_series()
-        self.dataframe = self.create_dataframes(self.json)
-        self.hourly_time = self.get_time_hourly(self.dataframe)
-        self.hourly_temps = self.interpolate_weather(self.dataframe,
-                                                     self.hourly_time, 'temp')
+        self.dataframe = CreateWeatherForecastData(self.json).dataframe
+        #TODO create class for interpolation
+        # self.hourly_time = self.get_time_hourly(self.dataframe)
+        # self.hourly_temps = self.interpolate_weather(self.dataframe,
+        #                                              self.hourly_time, 'temp')
 
     def get_series(self):
         """
@@ -101,23 +102,6 @@ class GetWeatherForecast(object):
         )
         owm_req = requests.get(self.owm_url, params=owm_parms)
         return json.loads(owm_req.text)
-
-    def create_dataframes(self, json):
-        """
-        Creates a pandas dataframe of data key in json returned from get_series
-        :param json: is an owm forecast json object
-        """
-        time_dict = {}
-        # first loop through each 3 hr interval in forecast
-        for i in json['list']:
-            time = self.utc2local(datetime.strptime(
-                i['dt_txt'], '%Y-%m-%d %H:%M:%S'))
-            temps_dict = {'temp': None, 'temp_max': None, 'temp_min': None}
-            # create nested dict for each temp attribute
-            for j in temps_dict:
-                temps_dict[j] = i['main'][j]
-            time_dict[time] = temps_dict
-        return pd.DataFrame.from_dict(time_dict, orient='index')
 
     def interpolate_weather(self, weather_detail, time, key):
         """
@@ -142,17 +126,6 @@ class GetWeatherForecast(object):
         """
         min_time, max_time = weather_detail.index.min(), weather_detail.index.max()
         return pd.date_range(min_time, max_time, freq='H')
-
-    @staticmethod
-    def utc2local(utc):
-        """
-        Convert UTC time to local time
-        :param utc: datetime object with UTC format
-        """
-        epoch = time.mktime(utc.timetuple())
-        offset = datetime.fromtimestamp(
-            epoch) - datetime.utcfromtimestamp(epoch)
-        return utc + offset
 
 
 class GetWeatherHistory(object):
@@ -245,11 +218,11 @@ def local2utc(date):
     return date_gmt
 
 
-class CreateEnergyDataFrame(object):
+class CreateEnergyData(object):
     '''Creates the dataframe for Energy API call'''
 
     def __init__(self, json):
-        """:param json: is an eia json object"""
+        """:param json: eia json"""
         self.json = json
         self.series = self.json['series']
         self.data = self.series[0]['data']
@@ -273,3 +246,48 @@ class CreateEnergyDataFrame(object):
             date_list.append(datetime.strptime(
                 time, freq[self.series[0]['f']]).strftime('%Y-%m-%d %H:%M:%S'))
         return date_list
+
+
+class CreateWeatherForecastData(object):
+    """Creates the dataframe for Open Weather Map API call"""
+
+    def __init__(self, json):
+        """":param json: a open weather map json object """
+        self.json = json
+        self.series = self.json['list']
+        self.dataframe = self.create_dataframe()
+
+    def create_dataframe(self):
+        """Function to create dataframe from json['list'] """
+        dates = []
+        values = []
+        for i in self.series:
+            time = datetime.strptime(i['dt_txt'], '%Y-%m-%d %H:%M:%S')
+            dates.append(ConvertTime(time).utc_to_local())
+            values.append(i['main']['temp'])
+        return pd.DataFrame(values, index=dates, columns=['values'])
+
+
+#TODO create interpolation class here
+
+
+class ConvertTime(object):
+    """Handles GMT to local conversions"""
+
+    def __init__(self, time):
+        """:param time: a datetime object"""
+        self.time = time
+
+    def utc_to_local(self):
+        """converts from gmt to local"""
+        epoch = time.mktime(self.time.timetuple())
+        offset = datetime.fromtimestamp(
+            epoch) - datetime.utcfromtimestamp(epoch)
+        return self.time + offset
+
+    def local_to_utc(self):
+        """converts from local to gmt"""
+        epoch = time.mktime(self.time.timetuple())
+        offset = datetime.fromtimestamp(
+            epoch) - datetime.utcfromtimestamp(epoch)
+        return self.time - offset
