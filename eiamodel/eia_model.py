@@ -105,75 +105,31 @@ class GetWeatherHistory(object):
     def __init__(self, ncdc_api, station_id, variable, start, end):
         """
         Create pyowm forecast object and return related attributes
-        :param api_key: a valid Open Weath Map Api-Key
-        :param city_id: a valid Open Weather Map city ID
-        :param type: a time interval ex:hour
-        :param units: default is Kelvin, imperial=Fahrenheight
+        :param api_key: a valid NCDC Api-Key
+        :param station_id: a valid weather station
+        :param variable: a ncdc recognized weather station variable
         :param start: a start time in %Y-%m-%d %H:%M:%S format
         :param end: and end time %Y-%m-%d %H:%M:%S format
         """
         self.api_key = ncdc_api
         self.station_id = station_id
         self.variable = variable
-        self.start = self.local2utc(start)
-        self.end = self.local2utc(end)
+        self.start = start
+        self.end = end
         self.req = self.get_series()
-        # self.dataframe = self.create_dataframe().dropna(axis=1, how='all')
+        self.df = CreateWeatheHistoryData(self.req).df
 
     def get_series(self):
         """
         Calls the EIA API with supplied api_key on init and series_id and return json
         """
-        noaa_req = requests.get(self.noaa_url.format(self.station_id, self.variable, self.start,
-                                                     self.end, self.api_key))
+        start = datetime.strftime(local_to_utc(
+            datetime.strptime(self.start, '%Y-%m-%d %H:%M:%S')), '%Y%m%d%H%M')
+        end = datetime.strftime(local_to_utc(
+            datetime.strptime(self.end, '%Y-%m-%d %H:%M:%S')), '%Y%m%d%H%M')
+        noaa_req = requests.get(self.noaa_url.format(self.station_id, self.variable, start,
+                                                     end, self.api_key))
         return noaa_req
-
-    def create_dataframe(self):
-        df = pd.read_csv(StringIO(self.req.text), header=None,
-                         na_values='null', keep_default_na=True, na_filter=True)
-        # filter for hourly reads 'FM-15'
-        df = df[df[19] == 'FM-15']
-        df[3] = df[3].map("{:04}".format)
-        df['date'] = pd.to_datetime(
-            df[2].map(str) + df[3].map(str), format='%Y%m%d%H%M')
-        df['date'] = df.apply(self.utc2local, axis=1)
-        df['temp'] = df.apply(self.temp_convert, axis=1)
-        df['hdd'] = df.apply(create_hdd, axis=1)
-        df['cdd'] = df.apply(create_cdd, axis=1)
-        return df.set_index(df['date'])
-
-    @staticmethod
-    def utc2local(date):
-        epoch = time.mktime(date['date'].timetuple())
-        offset = datetime.fromtimestamp(
-            epoch) - datetime.utcfromtimestamp(epoch)
-        return date['date'] + offset
-
-    @staticmethod
-    def local2utc(date):
-        """Converts a time in local time to GMT to input to ncdc url
-        :param date: a date in %Y-%m-%d %H:%M format
-        """
-        date = datetime.strptime(date, '%Y-%m-%d %H:%M')
-        epoch = time.mktime(date.timetuple())
-        offset = datetime.fromtimestamp(
-            epoch) - datetime.utcfromtimestamp(epoch)
-        date_gmt = datetime.strftime(date - offset, '%Y%m%d%H%M')
-        return date_gmt
-
-    @staticmethod
-    def temp_convert(temp):
-        return temp[5] / 10 * 9 / 5 + 32
-
-
-def create_hdd(temp):
-    """Converts F to HDD"""
-    return max(0, 65 - temp['temp'])
-
-
-def create_cdd(temp):
-    """Converts F to DD"""
-    return max(0, temp['temp'] - 65)
 
 
 class CreateEnergyData(object):

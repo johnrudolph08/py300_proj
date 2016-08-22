@@ -14,8 +14,8 @@ units = 'imperial'
 # parms for ncdc calls
 freq2 = 'hour'
 # ncdc uses GMT
-start2 = '2016-08-05 00:00'
-end2 = '2016-08-05 23:00'
+start2 = '2016-08-05 00:00:00'
+end2 = '2016-08-05 23:00:00'
 ncdc_api = 'zxzVwDAzAfJlmKJHJIK'
 # TMP is C*10
 variable = 'TMP'
