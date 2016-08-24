@@ -54,7 +54,7 @@ class GetEnergy(object):
     @staticmethod
     def format_date(freq, date):
         """formats input dates to correct"""
-        date = datetime.strptime(date, '%Y-%m-%d %H:%M:%S')
+        date = local_to_utc(datetime.strptime(date, '%Y-%m-%d %H:%M:%S'))
         freq_dict = {'A': '%Y', 'M': '%Y%m', 'W': '%Y%m%d',
                      'D': '%Y%m%d', 'H': '%Y%m%dT%HZ'}
         formatted_date = datetime.strftime(date, freq_dict[freq])
@@ -157,8 +157,8 @@ class CreateEnergyData(object):
             # need to add this ugly bit to remove hourly time format from EIA
             time = x[0].replace('T', ' ')
             time = time.replace('Z', '')
-            date_list.append(datetime.strptime(
-                time, freq[self.series[0]['f']]).strftime('%Y-%m-%d %H:%M:%S'))
+            time = utc_to_local(datetime.strptime(time, freq[self.series[0]['f']]))
+            date_list.append(time.strftime('%Y-%m-%d %H:%M:%S'))
         return date_list
 
 
@@ -199,15 +199,16 @@ class CreateWeatheHistoryData(object):
         return self.apply_filters(req_df)
 
     def apply_filters(self, df):
-        # filter out non hourly increment reads
-        df[df.iloc[:, 19] == 'FM-15']
         # pad hourly format
         df.iloc[:, 3] = df.iloc[:, 3].map("{:04}".format)
+        # formate dates and temperatures
         df.loc[:, 'date'] = pd.to_datetime(
             df.iloc[:, 2].map(str) + df.iloc[:, 3].map(str), format='%Y%m%d%H%M')
         df.loc[:, 'date'] = df.loc[:, 'date'].map(utc_to_local)
         df.loc[:, 'temp'] = df.iloc[:, 5].map(self.convert_ncdc_temp)
-        return df.set_index(df['date'])
+        df = df.set_index(df['date'])
+        # return filtered data frame and subset
+        return df.loc[df.iloc[:, 19] == 'FM-15']
 
     @staticmethod
     def convert_ncdc_temp(temp):
